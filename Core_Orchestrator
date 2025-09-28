@@ -4,9 +4,8 @@
  * @namespace Core_Orchestrator
  */
 const Core_Orchestrator = {
-  create: function(data) {
-    // Foundational steps
-    const context = Engine_ContextBuilder.buildInitialContext(data);
+  create: function(context) {  // Changed from 'data' to 'context'
+    // Remove the duplicate context building since it's done in main
     Engine_ConstraintApplier.apply(context);
     Engine_ContextBuilder.recalculateTargetsAfterConstraints(context);
 
