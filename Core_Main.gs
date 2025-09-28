@@ -55,6 +55,7 @@ function onOpen() {
       .addItem('Stage 3: 목표 계산 테스트', 'DebugService.runTestStage3')
       .addItem('Stage 4: 사전 조건 적용 테스트', 'DebugService.runTestStage4')
       .addItem('Stage 5: 메인 루프 테스트', 'DebugService.runTestStage5')
+      .addItem('Stage 6: 당직 배정 테스트', 'DebugService.runTestStage6')
       .addSeparator()
       .addItem('🧪 모든 테스트 실행 (로그 시트 확인)', 'DebugService.runAllTests')
     )

@@ -13,27 +13,24 @@ const Orchestrator = {
   generateSchedule: function(year, month) {
     LoggerService.log(`--- Starting Schedule Generation for ${year}-${month} ---`);
     
-    // 1. Initialize Context
     const context = this._initializeContext(year, month);
     LoggerService.log("Step 1: Context Initialized.");
 
-    // 2. Calculate Targets
     this._calculateAndSetStaffTargets(context);
     LoggerService.log("Step 2: Staff Targets Calculated.");
     
-    // 3. Apply Pre-Constraints (Vacations, Golden Weekends)
     this._applyPreConstraints(context);
-    LoggerService.log("Step 3: Pre-constraints (Vacations, etc.) Applied.");
+    LoggerService.log("Step 3: Pre-constraints (Vacations, Golden Weekends) Applied.");
 
-    // 4. Main Generation Loop (Delegated to Assignment Engine)
     AssignmentEngine.runMainLoop(context);
     LoggerService.log("Step 4: Main Generation Loop COMPLETED.");
     
-    // 5. Post-Processing & Validation (Future Implementation)
-    // LoggerService.log("Step 5: Starting Post-Processing and Validation...");
+    // --- (NEW) Step 5: Assign On-Call Shifts ---
+    this._assignOnCallShifts(context);
+    LoggerService.log("Step 5: On-Call Shifts Assigned.");
     
     // 6. Write to Sheet
-    SheetService.writeSchedule(context.schedule, context.config.staff);
+    SheetService.writeSchedule(context);
     LoggerService.log("Step 6: Schedule Written to Sheet.");
     LoggerService.log("--- Schedule Generation Finished Successfully ---");
 
@@ -92,7 +89,6 @@ const Orchestrator = {
       // Determine daily requirements
       const requirements = { minStaff: 0, maxStaff: 0, onCall: false };
       
-      // --- (MODIFIED) Logic for Shutdown Holidays ---
       if (dayType === '병원휴무일') {
         requirements.minStaff = 0;
         requirements.maxStaff = 0;
@@ -224,57 +220,79 @@ const Orchestrator = {
       }
     });
 
-    // --- (MODIFIED) Simpler, more robust Golden Weekend assignment ---
-    if (context.config.rules.golden_weekend_enabled) {
-      const days = context.config.rules.golden_weekend_days.split(',');
-      const firstDayOfWeek = days[0];
-      const secondDayOfWeek = days[1];
+    if (isTest) {
+      return log;
+    }
+  },
 
-      // Find all possible slots and initialize their assignment counters
-      const availableSlots = [];
-      for (const dateString in context.schedule) {
-        const day = context.schedule[dateString];
-        if (day.dayName === firstDayOfWeek) {
-          const nextDay = new Date(day.date);
-          nextDay.setDate(nextDay.getDate() + 1);
-          const nextDayString = DateUtils.formatDate(nextDay);
-          if (context.schedule[nextDayString] && context.schedule[nextDayString].dayName === secondDayOfWeek) {
-            availableSlots.push({ day1: dateString, day2: nextDayString, assignedCount: 0 });
+  /**
+   * Iterates through the schedule and assigns on-call shifts where required.
+   * This happens *after* the main schedule is generated.
+   * @param {object} context The main context object.
+   * @param {boolean} [isTest=false] - If true, returns a log object.
+   * @returns {object|void} If isTest, returns log object.
+   * @private
+   */
+  _assignOnCallShifts: function(context, isTest = false) {
+    const onCallShiftCode = 'OC10';
+    const onCallShift = context.config.shifts[onCallShiftCode];
+    if (!onCallShift) {
+      LoggerService.log("WARNING: On-call shift 'OC10' not found in config. Skipping on-call assignments.");
+      return;
+    }
+
+    let log = { onCallAssignments: 0, details: [] };
+
+    const sortedDates = Object.keys(context.schedule).sort();
+
+    for (const dateString of sortedDates) {
+      const day = context.schedule[dateString];
+
+      if (day.requirements.onCall) {
+        // Find eligible candidates: those working a regular shift.
+        let candidates = Object.values(context.staff).filter(staff => {
+          const assignment = day.assignments[staff.name];
+          return assignment && assignment !== 'OFF' && assignment !== '휴가' && assignment !== onCallShiftCode;
+        });
+
+        // Filter out candidates who were on-call the previous day
+        const prevDay = new Date(day.date);
+        prevDay.setDate(prevDay.getDate() - 1);
+        const prevDayString = DateUtils.formatDate(prevDay);
+        
+        candidates = candidates.filter(staff => {
+          if (context.schedule[prevDayString]) {
+            return context.schedule[prevDayString].assignments[staff.name] !== onCallShiftCode;
           }
+          return true; // No previous day, so no restriction
+        });
+        
+        if (candidates.length === 0) {
+          log.details.push(`WARNING for ${dateString}: No eligible candidates found for on-call duty.`);
+          continue;
         }
+
+        // Find the best candidate: the one with the fewest on-call days so far.
+        candidates.sort((a, b) => a.stats.onCallDays - b.stats.onCallDays);
+        const bestCandidate = candidates[0];
+
+        // --- Perform the shift swap ---
+        const originalAssignment = day.assignments[bestCandidate.name];
+        const originalShift = context.config.shifts[originalAssignment];
+
+        // 1. Revert original shift's stats
+        if (originalShift) {
+          bestCandidate.stats.currentHours -= originalShift.hours;
+        }
+
+        // 2. Apply new on-call shift's stats
+        day.assignments[bestCandidate.name] = onCallShiftCode;
+        bestCandidate.stats.currentHours += onCallShift.hours;
+        bestCandidate.stats.onCallDays++;
+
+        log.onCallAssignments++;
+        log.details.push(`Assigned ${onCallShiftCode} to ${bestCandidate.name} on ${dateString} (replaced ${originalAssignment})`);
       }
-
-      // Single Pass: Iterate through each staff member and find them a valid slot
-      Object.values(context.staff).forEach(staff => {
-        if (staff.stats.hasGoldenWeekendOff) return; // Already assigned
-
-        for (const slot of availableSlots) {
-          // --- NEW CHECK ---
-          const isSlotFull = slot.assignedCount >= context.config.rules.max_staff_on_golden_weekend_off;
-
-          const isSlotValidForStaff = !context.schedule[slot.day1].assignments[staff.name] &&
-                                      !context.schedule[slot.day2].assignments[staff.name] &&
-                                      this._canAssignOffWithoutViolatingRules(context, slot.day1) &&
-                                      this._canAssignOffWithoutViolatingRules(context, slot.day2);
-          
-          if (!isSlotFull && isSlotValidForStaff) {
-            // Assign the OFF block
-            context.schedule[slot.day1].assignments[staff.name] = 'OFF';
-            context.schedule[slot.day2].assignments[staff.name] = 'OFF';
-            staff.stats.hasGoldenWeekendOff = true;
-            slot.assignedCount++; // Increment the counter for this slot
-            
-            // Log the assignment
-            log.goldenWeekendsApplied++;
-            log.goldenWeekendDetails.push(`Assigned to ${staff.name} on ${slot.day1} & ${slot.day2}`);
-            
-            // Move to the next staff member
-            return;
-          }
-        }
-        // If the loop finishes and no slot was found for this staff member
-        log.goldenWeekendDetails.push(`WARNING: Could not find a valid Golden Weekend slot for ${staff.name}.`);
-      });
     }
 
     if (isTest) {

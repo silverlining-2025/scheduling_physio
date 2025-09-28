@@ -193,6 +193,46 @@ const DebugService = {
     }
   },
 
+  /** [STAGE 6] Tests the on-call shift assignment logic. */
+  test_assignOnCallShifts: function() {
+    try {
+      LoggerService.log("\n--- Running Stage 6 Test: On-Call Shift Assignment ---");
+      const { year, month } = SheetService.getTargetDate();
+      const context = Orchestrator._initializeContext(year, month);
+      Orchestrator._calculateAndSetStaffTargets(context);
+      Orchestrator._applyPreConstraints(context);
+      AssignmentEngine.runMainLoop(context);
+      
+      const log = Orchestrator._assignOnCallShifts(context, true);
+
+      LoggerService.log(`[ON-CALL] Assigned ${log.onCallAssignments} on-call shifts.`);
+      log.details.slice(0, 10).forEach(detail => LoggerService.log(`  - ${detail}`)); // Log first 10 for brevity
+
+      // Verification
+      const firstOnCallDay = Object.values(context.schedule).find(d => d.requirements.onCall);
+      if (firstOnCallDay) {
+          const assignments = Object.values(firstOnCallDay.assignments);
+          if (!assignments.includes('OC10')) {
+              throw new Error(`On-call shift was required on ${firstOnCallDay.dateString} but was not assigned.`);
+          }
+           LoggerService.log(`[VERIFY] On-call shift correctly assigned on a required day (${firstOnCallDay.dateString}). Check PASSED.`);
+      } else {
+          LoggerService.log(`[VERIFY] No on-call shifts were required this month.`);
+      }
+
+      this._logScheduleState(context, 'Stage 6');
+      SheetService.writeSchedule(context);
+      LoggerService.log('[VISUAL] The schedule sheet has been updated to show the final schedule with on-call shifts.');
+
+      LoggerService.log("✅ Stage 6 Test PASSED");
+      return true;
+
+    } catch (e) {
+      LoggerService.log(`❌ Stage 6 Test FAILED: ${e.message}\n${e.stack}`);
+      return false;
+    }
+  },
+
   // --- PUBLIC TEST RUNNERS ---
   _runSingleTest: function(testName, testFunction) {
     try {
@@ -209,6 +249,7 @@ const DebugService = {
   runTestStage3: function() { this._runTest('Stage 3', this.test_calculateAndSetStaffTargets); },
   runTestStage4: function() { this._runTest('Stage 4', this.test_applyPreConstraints); },
   runTestStage5: function() { this._runTest('Stage 5', this.test_mainGenerationLoop); },
+  runTestStage6: function() { this._runTest('Stage 6', this.test_assignOnCallShifts); },
 
   _runTest: function(stageName, testFunc) {
       const ui = SpreadsheetApp.getUi();
@@ -234,7 +275,8 @@ const DebugService = {
         { name: 'Stage 2', func: this.test_initializeContext },
         { name: 'Stage 3', func: this.test_calculateAndSetStaffTargets },
         { name: 'Stage 4', func: this.test_applyPreConstraints },
-        { name: 'Stage 5', func: this.test_mainGenerationLoop }
+        { name: 'Stage 5', func: this.test_mainGenerationLoop },
+        { name: 'Stage 6', func: this.test_assignOnCallShifts }
       ];
       
       allPassed = tests.map(test => this._runSingleTest(test.name, test.func)).every(res => res === true);
@@ -249,4 +291,5 @@ const DebugService = {
     }
   }
 };
+
 
