@@ -1,0 +1,57 @@
+Automated Physiotherapy Room Scheduler
+Overview
+This Google Apps Script project is designed to automate the complex process of creating monthly work schedules for a physiotherapy room. It takes into account a wide range of rules, staff availability, leave requests, and fairness metrics to generate a valid and balanced schedule draft with a single click.
+
+The script is tightly integrated with a Google Sheet that serves as its database and user interface.
+
+Key Features
+Rule-Based Generation: The schedule is built based on a comprehensive set of user-configurable rules defined in the ⚙️설정 sheet.
+
+Automated Leave Integration: Automatically blocks out dates for staff members whose leave requests have been approved in the ⛱️휴가신청 sheet.
+
+Fairness Balancing: Ensures work is distributed as evenly as possible, considering:
+
+Total monthly work hours vs. target hours.
+
+The number of on-call shifts per person.
+
+The number of weekend shifts per person.
+
+Constraint Satisfaction: Guarantees adherence to critical constraints like maximum consecutive workdays, minimum rest hours, and special guaranteed OFF blocks (e.g., one Fri+Sat OFF per month).
+
+Holiday Awareness: Can fetch official public holidays for South Korea via an API to correctly categorize days and apply holiday-specific rules.
+
+Developer Tools: Includes a dedicated menu for developers to test individual components of the scheduling engine, ensuring easier debugging and maintenance.
+
+High-Level Architecture
+The project follows a modular design pattern, separating concerns into distinct logical units for maintainability and clarity.
+
+/Core: Manages the application's lifecycle, configuration, triggers, and the main orchestration flow.
+
+/Engine: Contains the core algorithms responsible for the actual scheduling logic (e.g., assigning on-call shifts, balancing hours, applying constraints).
+
+/Service: Acts as a bridge between the script and external resources. This includes reading/writing to the Google Sheet and making API calls.
+
+/Util: Provides common, reusable helper functions (e.g., logging, debugging tools).
+
+How to Use
+Configure Rules: Ensure all staff information, shift definitions, and scheduling rules are correctly filled out in the ⚙️설정 sheet.
+
+Update Leave: Approve or reject leave requests in the ⛱️휴가신청 sheet.
+
+Generate Schedule: From the spreadsheet menu, navigate to 🗓️ 스케줄 자동생성 > 1. 스케줄 초안 생성.
+
+Review: The script will generate the schedule in the ⭐근무표 sheet and log its actions in the 📈로그 sheet.
+
+Initial Setup
+API Key: To use the automatic holiday update feature, you must obtain a free API key from data.go.kr.
+
+Script Properties: Store your API key in the Apps Script project settings:
+
+Go to Project Settings (⚙️ icon).
+
+Scroll down to Script Properties.
+
+Click Add script property.
+
+Enter HOLIDAY_API_KEY as the Property and your actual API key as the Value.
