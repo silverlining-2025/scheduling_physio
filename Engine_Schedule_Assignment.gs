@@ -41,16 +41,17 @@ const AssignmentEngine = {
     // --- Assignment Pass ---
     // First, give OFFs to highest priority candidates if rules allow
     for (const candidate of offCandidates) {
-      if (Orchestrator._canAssignOffWithoutViolatingRules(context, dateString)) {
-        this._makeAssignment(context, dateString, candidate.staff.name, 'OFF');
+      // Check if the staff member is still unassigned before making a new assignment
+      if (!context.schedule[dateString].assignments[candidate.staff.name] && Orchestrator._canAssignOffWithoutViolatingRules(context, dateString)) {
+        this._makeAssignment(context, dateString, candidate.staff.name, context.config.specialShiftCodes.off);
       }
     }
 
     // Assign work shifts to the rest using the best-fit logic
     const remainingStaff = Object.values(context.staff).filter(s => !day.assignments[s.name]);
     for (const staff of remainingStaff) {
-       const bestShiftCode = this._getBestFitWorkShift(context, staff, day.dayType);
-       this._makeAssignment(context, dateString, staff.name, bestShiftCode);
+        const bestShiftCode = this._getBestFitWorkShift(context, staff, day.dayType);
+        this._makeAssignment(context, dateString, staff.name, bestShiftCode);
     }
   },
   
@@ -112,6 +113,23 @@ const AssignmentEngine = {
     if (staff.stats.consecutiveWorkDays >= staff.constraints.maxConsecutiveWork - 1) {
       score += 1000;
     }
+    
+    // Enforce Paired Weekend Work Rule
+    const day = context.schedule[dateString];
+    if (context.config.rules.enforce_paired_weekend_work && day.dayName === '일요일') {
+        const prevDay = new Date(day.date);
+        prevDay.setDate(prevDay.getDate() - 1);
+        const prevDayString = Util_Date.formatDate(prevDay);
+        
+        if (context.schedule[prevDayString] && context.schedule[prevDayString].dayName === '토요일') {
+            const saturdayAssignment = context.schedule[prevDayString].assignments[staff.name];
+            // If they worked on Saturday, give high priority for a Sunday OFF.
+            if (saturdayAssignment && saturdayAssignment !== context.config.specialShiftCodes.off && saturdayAssignment !== context.config.specialShiftCodes.vacation) {
+                score += 500;
+            }
+        }
+    }
+
     // Add points for each OFF day they still need to meet their target
     const offDayDeficit = staff.targets.monthlyOffs - staff.stats.currentOffs;
     if (offDayDeficit > 0) {
@@ -139,11 +157,11 @@ const AssignmentEngine = {
     day.assignments[staffName] = assignmentCode;
 
     // Update stats based on the assignment type
-    if (assignmentCode === 'OFF') {
+    if (assignmentCode === context.config.specialShiftCodes.off) {
       staff.stats.currentOffs++;
       staff.stats.consecutiveOffDays++;
       staff.stats.consecutiveWorkDays = 0; // Reset work streak
-    } else if (shift) { // It's a work shift defined in the config
+    } else if (shift && shift.hours > 0) { // It's a work shift
       staff.stats.currentHours += shift.hours;
       staff.stats.consecutiveWorkDays++;
       staff.stats.consecutiveOffDays = 0; // Reset OFF streak

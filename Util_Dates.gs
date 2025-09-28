@@ -3,7 +3,7 @@
  * @description Contains utility functions for date manipulation.
  */
 
-const DateUtils = {
+const Util_Date = {
   /**
    * Formats a Date object into 'YYYY-MM-DD' string.
    * @param {Date} date The date object.

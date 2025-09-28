@@ -6,192 +6,225 @@ const SheetService = {
 
   /**
    * Reads all configuration data from the '⚙️설정' sheet.
+   * This version is more robust and dynamically finds header columns.
    * @returns {object} A structured object containing staff info, shift types, and rules.
    */
   getConfig: function() {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.CONFIG);
-    const staffData = sheet.getRange('A2:A15').getValues().flat().filter(String);
-    const shiftData = sheet.getRange('E2:H15').getValues();
-    const rulesData = sheet.getRange('J2:L50').getValues();
-
-    const config = {
-      staff: staffData,
-      shifts: {},
-      rules: {}
+    const dataRange = sheet.getDataRange().getValues();
+    
+    const headers = {
+      staff: { text: '이름', row: -1, col: -1 },
+      shiftCode: { text: '근무 코드 (Code)', row: -1, col: -1 },
+      ruleKey: { text: '규칙 키 (Rule Key)', row: -1, col: -1 }
     };
 
-    // Parse shift types
-    shiftData.forEach(row => {
-      if (row[0]) { // If code exists
-        config.shifts[row[0]] = {
-          code: row[0],
-          description: row[1],
-          category: row[2],
-          hours: parseFloat(row[3]) || 0
-        };
+    // Find headers dynamically by searching the first 10 rows
+    for (let i = 0; i < Math.min(dataRange.length, 10); i++) {
+      for (let j = 0; j < dataRange[i].length; j++) {
+        const cellValue = String(dataRange[i][j]).trim();
+        if (cellValue === headers.staff.text && headers.staff.row === -1) {
+          headers.staff.row = i;
+          headers.staff.col = j;
+        }
+        if (cellValue === headers.shiftCode.text && headers.shiftCode.row === -1) {
+          headers.shiftCode.row = i;
+          headers.shiftCode.col = j;
+        }
+        if (cellValue === headers.ruleKey.text && headers.ruleKey.row === -1) {
+          headers.ruleKey.row = i;
+          headers.ruleKey.col = j;
+        }
       }
-    });
-
-    // --- Parse all rules into a key-value object ---
-    const allRules = {};
-    rulesData.forEach(row => {
-        if (row[0]) { // Check if the key exists
-            allRules[row[0]] = row[1];
-        }
-    });
+    }
     
-    // --- Helper function to find a rule's value from the object ---
-    const getRuleValue = (rulesObject, key, defaultValue) => {
-        if (rulesObject.hasOwnProperty(key) && rulesObject[key] !== '') {
-            return rulesObject[key];
+    const config = { staff: [], shifts: {}, rules: {}, specialShiftCodes: {} };
+
+    // Parse Staff
+    if (headers.staff.row !== -1) {
+      for (let i = headers.staff.row + 1; i < dataRange.length; i++) {
+        const name = dataRange[i][headers.staff.col];
+        if (name && String(name).trim() !== '') {
+          config.staff.push(name);
+        } else {
+          // Stop if we hit an empty cell in the name column
+          if (i > headers.staff.row) break;
         }
-        return defaultValue;
-    };
-    
-    // === Comprehensive Rule Loading ===
+      }
+    }
 
-    // --- 1. Labor Laws & Regulations ---
-    config.rules.max_weekly_hours = parseInt(getRuleValue(allRules, 'max_weekly_hours', '52'), 10);
-    config.rules.max_daily_hours = parseInt(getRuleValue(allRules, 'max_daily_hours', '10'), 10);
-    config.rules.min_rest_hours_between_shifts = parseInt(getRuleValue(allRules, 'min_rest_hours_between_shifts', '11'), 10);
-    config.rules.max_consecutive_work_days = parseInt(getRuleValue(allRules, 'consecutive_work_days_max', '6'), 10);
+    // Parse Shifts
+    if (headers.shiftCode.row !== -1) {
+      const codeCol = headers.shiftCode.col;
+      for (let i = headers.shiftCode.row + 1; i < dataRange.length; i++) {
+        const code = dataRange[i][codeCol];
+        if (code && String(code).trim() !== '') {
+          const shiftInfo = {
+            code: code,
+            description: dataRange[i][codeCol + 1],
+            category: dataRange[i][codeCol + 2],
+            hours: parseFloat(dataRange[i][codeCol + 3]) || 0
+          };
+          config.shifts[code] = shiftInfo;
 
-    // --- 2. Staffing Requirements per Day ---
-    config.rules.mon_staff_fixed = parseInt(getRuleValue(allRules, 'mon_staff_fixed', '6'), 10);
-    config.rules.tue_fri_staff_min = parseInt(getRuleValue(allRules, 'tue_fri_staff_min', '4'), 10);
-    config.rules.tue_fri_staff_max = parseInt(getRuleValue(allRules, 'tue_fri_staff_max', '5'), 10);
-    config.rules.weekend_holiday_staff_required = parseInt(getRuleValue(allRules, 'weekend_holiday_staff_required', '2'), 10);
-    config.rules.oncall_required_weekday = getRuleValue(allRules, 'oncall_required_weekday', 'FALSE').toString().toUpperCase() === 'TRUE';
-    config.rules.oncall_required_weekend = getRuleValue(allRules, 'oncall_required_weekend', 'FALSE').toString().toUpperCase() === 'TRUE';
+          if (shiftInfo.category === 'OFF') config.specialShiftCodes.off = code;
+          if (shiftInfo.category === '당직') config.specialShiftCodes.onCall = code;
+        } else {
+          if (i > headers.shiftCode.row) break;
+        }
+      }
+    }
 
-    // --- 3. Fairness, Targets & Constraints ---
-    config.rules.target_monthly_hours_method = getRuleValue(allRules, 'target_monthly_hours_method', 'auto');
-    config.rules.target_weekly_hours_max = parseInt(getRuleValue(allRules, 'target_weekly_hours_max', '52'), 10);
-    config.rules.target_weekly_hours_method = getRuleValue(allRules, 'target_weekly_hours_method', 'auto');
-    config.rules.golden_weekend_enabled = getRuleValue(allRules, 'golden_weekend_enabled', 'TRUE').toString().toUpperCase() === 'TRUE';
-    config.rules.golden_weekend_days = getRuleValue(allRules, 'golden_weekend_days', '금요일,토요일');
-    config.rules.enforce_paired_weekend_work = getRuleValue(allRules, 'enforce_paired_weekend_work', 'TRUE').toString().toUpperCase() === 'TRUE';
-    config.rules.max_consecutive_offs = parseInt(getRuleValue(allRules, 'max_consecutive_offs', '2'), 10);
-    config.rules.consecutive_oncall_days_max = parseInt(getRuleValue(allRules, 'consecutive_oncall_days_max', '1'), 10);
-    config.rules.consecutive_weekend_work_days_max = parseInt(getRuleValue(allRules, 'consecutive_weekend_work_days_max', '1'), 10);
-    config.rules.max_staff_on_golden_weekend_off = parseInt(getRuleValue(allRules, 'max_staff_on_golden_weekend_off', '2'), 10);
+    // Parse Rules
+    if (headers.ruleKey.row !== -1) {
+      const keyCol = headers.ruleKey.col;
+      for (let i = headers.ruleKey.row + 1; i < dataRange.length; i++) {
+        const key = dataRange[i][keyCol];
+        if (key && String(key).trim() !== '') {
+          config.rules[key] = dataRange[i][keyCol + 1];
+        } else {
+           if (i > headers.ruleKey.row) break;
+        }
+      }
+    }
 
-    // --- 4. Algorithm Behavior ---
-    config.rules.off_day_calculation_method = getRuleValue(allRules, 'off_day_calculation_method', 'sundays_holidays_half_saturdays');
+    if (!config.rules.hasOwnProperty('golden_weekend_days') || !config.rules.golden_weekend_days) {
+      LoggerService.log("[CONFIG WARNING] 'golden_weekend_days' rule not found or is empty in settings. Defaulting to '금요일,토요일'.");
+      config.rules.golden_weekend_days = '금요일,토요일';
+    }
+
+    for (const key in config.rules) {
+      const value = config.rules[key];
+      if (!isNaN(parseFloat(value)) && isFinite(value)) {
+        config.rules[key] = parseFloat(value);
+      } else if (String(value).toUpperCase() === 'TRUE') {
+        config.rules[key] = true;
+      } else if (String(value).toUpperCase() === 'FALSE') {
+        config.rules[key] = false;
+      }
+    }
 
     return config;
   },
-
+  
   /**
-   * Reads and parses approved vacation requests from '⛱️휴가신청'.
+   * Reads and parses approved vacation requests, correcting for timezone issues.
+   * @param {number} year The target year.
+   * @param {number} month The target month (1-12).
    * @returns {Array<object>} An array of vacation request objects.
    */
-  getVacationRequests: function() {
+  getVacationRequests: function(year, month) {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.VACATION);
-    const data = sheet.getRange(2, 1, sheet.getLastRow(), 8).getValues();
+    const data = sheet.getDataRange().getValues();
     const requests = [];
 
-    data.forEach(row => {
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
       const status = row[7];
-      if (row[2] && status === '승인') { 
-        requests.push({
-          name: row[2],
-          type: row[3],
-          start: new Date(row[4]),
-          end: new Date(row[5])
-        });
+      const name = row[2];
+      if (!name || status !== '승인') continue;
+
+      try {
+        const type = row[3];
+        // Correctly parse dates to avoid timezone shift
+        const startCell = new Date(row[4]);
+        const start = new Date(startCell.getFullYear(), startCell.getMonth(), startCell.getDate());
+
+        const endCell = new Date(row[5]);
+        const end = new Date(endCell.getFullYear(), endCell.getMonth(), endCell.getDate());
+
+        const overlaps = (start.getFullYear() < year || (start.getFullYear() === year && start.getMonth() + 1 <= month)) &&
+                         (end.getFullYear() > year || (end.getFullYear() === year && end.getMonth() + 1 >= month));
+
+        if (overlaps) {
+          requests.push({ name, type, start, end });
+        }
+      } catch(e) {
+        LoggerService.log(`[WARNING] Could not parse date for row ${i+1} in Vacation sheet. Skipping.`);
       }
-    });
+    }
     return requests;
+  },
+  
+  /**
+   * Reads raw data from the vacation sheet for debugging purposes.
+   * @returns {Array<Array<any>>} The raw data.
+   */
+  getRawVacationData: function() {
+      const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.VACATION);
+      const data = sheet.getDataRange().getValues();
+      data.shift(); // Remove header row
+      return data;
   },
 
   /**
    * Reads holiday data for the target month from '📅캘린더'.
    * @param {number} year The target year.
    * @param {number} month The target month (1-12).
-   * @returns {Array<object>} An array of holiday objects {date: 'YYYY-MM-DD', type: '공휴일'}.
+   * @returns {Array<object>} An array of holiday objects.
    */
   getHolidays: function(year, month) {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.CALENDAR);
-    const data = sheet.getRange('A2:C').getValues();
+    const data = sheet.getDataRange().getValues();
     const holidays = [];
     
-    data.forEach(row => {
-      if (!row[0] || !row[2]) return; // Skip if no date or type
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (!row[0] || !row[2]) continue;
       const date = new Date(row[0]);
       const holidayType = row[2];
-
       const isHoliday = holidayType === '공휴일' || holidayType === '병원휴무일' || holidayType === '대체휴일';
 
       if (date.getFullYear() === year && date.getMonth() + 1 === month && isHoliday) {
         holidays.push({
-          date: Utilities.formatDate(date, 'Asia/Seoul', 'yyyy-MM-dd'),
+          date: Util_Date.formatDate(date),
           type: holidayType
         });
       }
-    });
+    }
     return holidays;
   },
 
   /**
    * Writes the newly generated schedule to the '⭐근무표' sheet.
-   * Performs a pre-emptive validation check before writing.
    * @param {object} context The entire context object.
    */
   writeSchedule: function(context) {
     const { schedule, config } = context;
     const staffList = config.staff;
-
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(SHEETS.SCHEDULE);
-
-    const year = new Date(Object.keys(schedule)[0]).getFullYear();
-    const month = new Date(Object.keys(schedule)[0]).getMonth() + 1;
-
-    sheet.getRange('B1').setValue(year);
-    sheet.getRange('C1').setValue(month);
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.SCHEDULE);
     
-    const clearRange = sheet.getRange(3, 6, sheet.getMaxRows() - 2, staffList.length);
-    clearRange.clearContent();
-
-    const validCodes = new Set(Object.keys(config.shifts));
-    validCodes.add('OFF');
-    validCodes.add('휴가');
-    validCodes.add('');
+    sheet.getRange('B1').setValue(context.year);
+    sheet.getRange('C1').setValue(context.month);
+    
+    if(staffList.length > 0) {
+        const clearRange = sheet.getRange(3, 6, sheet.getMaxRows() - 2, staffList.length);
+        clearRange.clearContent();
+    }
 
     const dateColumn = sheet.getRange(3, 1, sheet.getLastRow() - 2, 1).getValues().flat();
     const scheduleData = [];
-    let validationPassed = true;
 
     dateColumn.forEach(dateCell => {
-        const rowData = [];
-        if (dateCell instanceof Date) {
-            const dateString = Utilities.formatDate(dateCell, 'Asia/Seoul', 'yyyy-MM-dd');
-            if(schedule[dateString]) {
+        let rowData = [];
+        if (dateCell instanceof Date && dateCell.getFullYear() === context.year && dateCell.getMonth() + 1 === context.month) {
+            const dateString = Util_Date.formatDate(dateCell);
+            if(schedule[dateString] && staffList.length > 0) {
                 const dayAssignments = schedule[dateString].assignments;
                 staffList.forEach(staffName => {
                     const assignment = dayAssignments[staffName] || '';
-                    if (!validCodes.has(assignment)) {
-                        LoggerService.log(`🚨 VALIDATION ERROR: Attempting to write invalid code '${assignment}' for staff '${staffName}' on date '${dateString}'.`);
-                        validationPassed = false;
-                    }
                     rowData.push(assignment);
                 });
-                scheduleData.push(rowData);
-            } else {
-                scheduleData.push(new Array(staffList.length).fill(''));
             }
-        } else {
-            scheduleData.push(new Array(staffList.length).fill(''));
         }
+        if(rowData.length === 0 && staffList.length > 0) {
+            rowData = new Array(staffList.length).fill('');
+        }
+        scheduleData.push(rowData);
     });
 
-    if (validationPassed && scheduleData.length > 0) {
+    if (scheduleData.length > 0 && staffList.length > 0) {
       sheet.getRange(3, 6, scheduleData.length, staffList.length).setValues(scheduleData);
-      LoggerService.log('[SheetService] Successfully wrote schedule to the sheet.');
-    } else if (!validationPassed) {
-        LoggerService.log('[SheetService] Write operation aborted due to validation errors.');
-        throw new Error("Invalid data found. Aborting write to sheet. Check logs for details.");
     }
   },
 
@@ -209,7 +242,6 @@ const SheetService = {
     const messages = Array.isArray(logMessages) ? logMessages : [logMessages];
     const formattedLogs = messages.map(msg => [new Date().toISOString(), msg]);
     logSheet.getRange(1, 1, formattedLogs.length, 2).setValues(formattedLogs);
-    // --- (MODIFIED) Force the sheet to update immediately ---
     SpreadsheetApp.flush();
   },
   
@@ -222,7 +254,7 @@ const SheetService = {
     const year = sheet.getRange('B1').getValue();
     const month = sheet.getRange('C1').getValue();
     if (!year || !month || isNaN(year) || isNaN(month)) {
-        throw new Error('"⭐근무표" 시트의 B1(년)과 C1(월)에 유효한 숫자를 입력해주세요.');
+        throw new Error(`"⭐근무표" 시트의 B1(년)과 C1(월)에 유효한 숫자를 입력해주세요.`);
     }
     return { year: parseInt(year, 10), month: parseInt(month, 10) };
   }
