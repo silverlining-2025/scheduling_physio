@@ -46,7 +46,15 @@ function generateDraftSchedule() {
     Util_Logger.log('--- Starting Full Schedule Generation ---');
 
     const schedulingData = _gatherSchedulingData();
-    const result = Core_Orchestrator.create(schedulingData);
+    
+    // CRITICAL FIX: Build initial context first
+    const context = Engine_ContextBuilder.buildInitialContext(schedulingData);
+    
+    // CRITICAL FIX: Initialize Service_Rules BEFORE orchestration
+    Service_Rules.init(context);
+    
+    // Now pass context directly instead of schedulingData
+    const result = Core_Orchestrator.create(context);
     
     const scheduleSheet = ss.getSheetByName(CONFIG.SHEET_NAMES.SCHEDULE);
     const startCell = scheduleSheet.getRange(CONFIG.SCHEDULE.SCHEDULE_AREA_START_CELL);
