@@ -1,86 +1,49 @@
 /**
- * @fileoverview This service acts as the main orchestrator for the scheduling process.
- * It now initializes the centralized Service_Rules as a critical first step.
- * @namespace Core_Orchestrator
+ * @file Core_Orchestrator.js
+ * @description Orchestrates the step-by-step process of schedule generation.
  */
 const Core_Orchestrator = {
-  create: function(data) {
-    // Foundational steps
-    const context = Engine_ContextBuilder.buildInitialContext(data);
-    Engine_ConstraintApplier.apply(context);
-    Engine_ContextBuilder.recalculateTargetsAfterConstraints(context);
+  /**
+   * Executes the entire scheduling pipeline in the correct order.
+   * Throws errors that are caught by the calling function in Core_Main.
+   */
+  run: function() {
+    Util_Logger.clear();
+    Util_Logger.log('INFO', '========== New Schedule Generation Run ==========');
 
-    // CRITICAL: Initialize the rulebook for all subsequent engines to use.
-    Service_Rules.init(context);
+    // Step 1: Fetch all raw data from the spreadsheet.
+    const initialData = Service_Sheet.fetchAllInitialData();
+    Util_Logger.log('INFO', 'Step 1/7: Successfully fetched all data from sheets.');
 
-    // Run scheduling engines
-    Engine_WeekendScheduler.schedule(context);
-    Engine_WeekendOffScheduler.schedule(context);
-    Engine_WeekdayScheduler.schedule(context);
-    Engine_OnCallScheduler.schedule(context);
-    Engine_Balancer.balance(context);
+    // Step 2: Build the initial context object.
+    const context = Engine_ContextBuilder.buildInitialContext(initialData);
+    Util_Logger.log('INFO', 'Step 2/7: Initial context built.');
+    Util_Debug.logContextState('After Context Build', context);
 
-    if (!Service_Validation.validate(context)) {
-      throw new Error("The generated schedule failed the final validation checks. Please review the logs for details.");
-    }
-    return { context };
-  },
+    // Step 3: Apply hard constraints (leave, special OFFs).
+    Engine_ConstraintApplier.run(context);
+    Util_Logger.log('INFO', 'Step 3/7: Applied hard constraints (leave, guaranteed OFFs).');
 
-  // --- Helper function for debug steps to ensure rules are always initialized ---
-  _runFoundation: function(data) {
-    const context = Engine_ContextBuilder.buildInitialContext(data);
-    Engine_ConstraintApplier.apply(context);
-    Engine_ContextBuilder.recalculateTargetsAfterConstraints(context);
-    Service_Rules.init(context); // Ensure rules are loaded for every debug step
-    return context;
-  },
+    // Step 4: Run the scheduling engines in a specific order.
+    Engine_OnCallScheduler.run(context);
+    Engine_WeekendScheduler.run(context);
+    Engine_WeekdayScheduler.run(context);
+    Engine_OffDayScheduler.run(context); // Explicitly fill remaining slots with OFF.
+    Util_Logger.log('INFO', 'Step 4/7: Core scheduling engines have completed.');
+    Util_Debug.logContextState('After Scheduling Engines', context);
 
-  runStep1_ApplyConstraints: function(data) {
-    const context = this._runFoundation(data);
-    return { context };
-  },
+    // Step 5: Balance the schedule for fairness.
+    Engine_Balancer.run(context);
+    Util_Logger.log('INFO', 'Step 5/7: Schedule balancing complete.');
 
-  runStep2_ScheduleWeekends: function(data) {
-    const context = this._runFoundation(data);
-    Engine_WeekendScheduler.schedule(context);
-    Engine_WeekendOffScheduler.schedule(context);
-    return { context };
-  },
-
-  runStep3_FillWeekdays: function(data) {
-    const context = this._runFoundation(data);
-    Engine_WeekendScheduler.schedule(context);
-    Engine_WeekendOffScheduler.schedule(context);
-    Engine_WeekdayScheduler.schedule(context);
-    return { context };
-  },
-
-  runStep4_AssignOnCall: function(data) {
-    const context = this._runFoundation(data);
-    Engine_WeekendScheduler.schedule(context);
-    Engine_WeekendOffScheduler.schedule(context);
-    Engine_WeekdayScheduler.schedule(context);
-    Engine_OnCallScheduler.schedule(context);
-    return { context };
-  },
-
-  runStep5_BalanceSchedule: function(data) {
-    const context = this._runFoundation(data);
-    Engine_WeekendScheduler.schedule(context);
-    Engine_WeekendOffScheduler.schedule(context);
-    Engine_WeekdayScheduler.schedule(context);
-    Engine_OnCallScheduler.schedule(context);
-    Engine_Balancer.balance(context);
-    return { context };
-  },
-  
-  recreateContextForValidation: function(data) {
-      const context = Engine_ContextBuilder.buildInitialContext(data);
-      const gridData = Service_Sheet.getScheduleGrid(context.numDays, context.staffList.length);
-      context.scheduleGrid = Util_Helpers.transpose(gridData);
-      Engine_ContextBuilder.recalculateTargetsAfterConstraints(context);
-      Service_Rules.init(context);
-      return context;
+    // Step 6: Validate the final schedule against all rules.
+    Service_Validation.runFullValidation(context);
+    Util_Logger.log('INFO', 'Step 6/7: Final schedule passed all validation checks.');
+    
+    // Step 7: Write the results back to the sheet.
+    Service_Summary.calculateAndWriteSummary(context);
+    Service_Sheet.writeScheduleToSheet(context);
+    Util_Logger.log('INFO', 'Step 7/7: Successfully wrote schedule and summary to the spreadsheet.');
   }
 };
 

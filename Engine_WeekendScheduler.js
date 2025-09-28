@@ -1,56 +1,86 @@
 /**
- * @fileoverview This engine module is responsible for scheduling weekend and holiday work.
- * It distributes these shifts fairly and respects the "paired weekend" rule.
- * This rewritten version is more rigorous and explicitly checks for leave before assigning shifts.
- * @namespace Engine_WeekendScheduler
+ * @file Engine_WeekendScheduler.js
+ * @description Schedules staff for weekend shifts based on defined rules.
  */
 const Engine_WeekendScheduler = {
   /**
-   * The main entry point to schedule all weekend/holiday shifts.
-   * @param {object} ctx The main context object, which will be modified in place.
+   * Runs the weekend scheduling logic for the entire month.
+   * @param {Object} context The global scheduling context.
    */
-  schedule: function(ctx) {
-    const weekendDays = Array.from(ctx.dayProfiles.values())
-      .filter(p => p.dayCategory === '주말' || p.dayCategory === '공휴일');
+  run: function (context) {
+    const enforcePairedWork = Service_Rules.getRule('enforce_paired_weekend_work') === true;
 
-    if (weekendDays.length === 0) {
-      Util_Logger.log("No weekend/holiday days found to schedule work for.");
-      return;
+    context.weeks.forEach(week => {
+      const weekendDays = week.days.filter(d => context.dayProfiles.get(d).category === CONFIG.DAY_CATEGORIES.WEEKEND);
+      
+      if (weekendDays.length === 2 && enforcePairedWork) {
+        this._schedulePairedWeekend(context, weekendDays[0], weekendDays[1]);
+      } else {
+        // Handle single weekend days (e.g., at month start/end) or if pairing is disabled.
+        weekendDays.forEach(day => this._scheduleSingleDay(context, day));
+      }
+    });
+  },
+
+  /**
+   * Schedules a paired Saturday/Sunday, ensuring one day on, one day off.
+   * @private
+   * @param {Object} context The global scheduling context.
+   * @param {number} sat The day number for Saturday.
+   * @param {number} sun The day number for Sunday.
+   */
+  _schedulePairedWeekend: function (context, sat, sun) {
+    const satMin = Service_Rules.getMinStaffForDay(sat);
+    const sunMin = Service_Rules.getMinStaffForDay(sun);
+    const shiftCode = Service_Rules.getRule('weekend_shift_code');
+    
+    // Find staff available for BOTH days.
+    let candidates = Util_Helpers.getAvailableStaffForDay(context, sat)
+      .filter(staffIndex => Util_Helpers.isStaffAvailableOnDay(context, sun, staffIndex));
+    
+    // --- Fairness Principle ---
+    candidates = Engine_Fairness.sortCandidatesByCount(context, candidates, 'weekendWorkCount');
+
+    let satCount = 0;
+    let sunCount = 0;
+
+    for (const staffIndex of candidates) {
+      // Prioritize Saturday staffing, then Sunday.
+      if (satCount < satMin) {
+        context.scheduleGrid[staffIndex][sat - 1] = shiftCode;
+        context.scheduleGrid[staffIndex][sun - 1] = CONFIG.SPECIAL_SHIFTS.OFF;
+        satCount++;
+      } else if (sunCount < sunMin) {
+        context.scheduleGrid[staffIndex][sun - 1] = shiftCode;
+        context.scheduleGrid[staffIndex][sat - 1] = CONFIG.SPECIAL_SHIFTS.OFF;
+        sunCount++;
+      }
     }
 
-    const totalWeekendSlots = weekendDays.reduce((sum, day) => sum + day.minStaff, 0);
-    const fairShare = Math.floor(totalWeekendSlots / ctx.staffList.length);
-    const remainder = totalWeekendSlots % ctx.staffList.length;
+    if (satCount < satMin || sunCount < sunMin) {
+        Util_Logger.log('WARNING', `Could not meet minimum staffing for weekend ${sat}-${sun}. Required: ${satMin}(Sat), ${sunMin}(Sun). Assigned: ${satCount}, ${sunCount}`);
+    }
+  },
 
-    ctx.staffList.forEach((name, index) => {
-        const profile = ctx.staffProfiles.get(name);
-        profile.weekendShiftsTarget = fairShare + (index < remainder ? 1 : 0);
-        profile.weekendShifts = 0; // Reset counter before scheduling
-    });
+  /**
+   * Schedules a single weekend day.
+   * @private
+   * @param {Object} context The global scheduling context.
+   * @param {number} day The day number to schedule.
+   */
+  _scheduleSingleDay: function(context, day) {
+    const minStaff = Service_Rules.getMinStaffForDay(day);
+    const shiftCode = Service_Rules.getRule('weekend_shift_code');
+    let assignedCount = Util_Helpers.getAssignedStaffCountForDay(context, day);
+    let candidates = Util_Helpers.getAvailableStaffForDay(context, day);
+    
+    candidates = Engine_Fairness.sortCandidatesByCount(context, candidates, 'weekendWorkCount');
 
-    weekendDays.forEach(dayProfile => {
-      const dayIndex = dayProfile.date.getDate() - 1;
-      
-      // --- RIGOROUS SAFETY CHECK: Build a list of candidates who are actually available ---
-      const candidates = ctx.staffList
-        .map(name => ctx.staffProfiles.get(name))
-        .filter(p => {
-            const staffIdx = ctx.staffList.indexOf(p.name);
-            // Must be available (not on leave) AND need a weekend shift.
-            return ctx.scheduleGrid[staffIdx][dayIndex] === null && p.weekendShifts < p.weekendShiftsTarget;
-        })
-        .sort((a,b) => (a.weekendShifts - b.weekendShifts)); // Prioritize those with fewer weekend shifts so far
-      
-      const staffToAssign = candidates.slice(0, dayProfile.minStaff);
-      
-      staffToAssign.forEach(profile => {
-          const staffIdx = ctx.staffList.indexOf(profile.name);
-          ctx.scheduleGrid[staffIdx][dayIndex] = ctx.rules.get('allowed_weekend_shift');
-          profile.weekendShifts++; 
-      });
-    });
-
-    Engine_ContextBuilder.updateStaffProfilesFromGrid(ctx);
+    for (const staffIndex of candidates) {
+      if (assignedCount >= minStaff) break;
+      context.scheduleGrid[staffIndex][day - 1] = shiftCode;
+      assignedCount++;
+    }
   }
 };
 

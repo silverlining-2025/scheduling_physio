@@ -1,55 +1,67 @@
 /**
- * @fileoverview This file contains all global constants and configuration settings for the scheduling application.
- * By centralizing these values, we can easily manage and update the script's behavior without changing the core logic.
- * @namespace CONFIG
+ * @file Core_Config.js
+ * @description Centralized configuration settings for the scheduling application.
+ * This file contains all essential settings, making the application easy to manage and update.
+ * All modules should refer to this file for constants instead of using hardcoded values.
  */
 const CONFIG = {
-  // --- Sheet Names ---
+  // 1. Spreadsheet and Sheet Configuration
   SHEET_NAMES: {
-    SCHEDULE: '⭐근무표',
     SETTINGS: '⚙️설정',
-    CALENDAR: '📅캘린더',
-    REQUESTS: '⛱️휴가신청',
+    SCHEDULE: '⭐근무표',
+    LEAVE_REQUESTS: '⛱️휴가신청',
     LOG: '📈로그',
+    MY_SCHEDULE: '👤내 근무 확인',
+    CALENDAR: '📅캘린der',
+  },
+
+  // 2. Cell Range Definitions
+  RANGES: {
+    SETTINGS_STAFF_LIST: 'A2:C',
+    SETTINGS_SHIFT_DEFINITIONS: 'E2:H',
+    SETTINGS_SCHEDULING_RULES: 'J2:L',
+    SCHEDULE_YEAR_MONTH: 'B1:C1',
+    SCHEDULE_GRID_START_CELL: 'F3',
+    CALENDAR_DATA_RANGE: 'A2:D',
+  },
+
+  // 3. Status and Keyword Definitions
+  LEAVE_STATUS: {
+    APPROVED: '승인',
+    PENDING: '대기',
+    REJECTED: '반려',
+  },
+  SHIFT_CATEGORIES: {
+    ON_CALL: '당직',
+    WEEKEND: '주말근무',
+    WEEKDAY: '일반근무',
+  },
+  DAY_CATEGORIES: {
+    WEEKEND: '주말',
+    HOLIDAY: '공휴일',
+    WEEKDAY: '평일',
+  },
+  SPECIAL_SHIFTS: {
+    OFF: 'OFF',
+  },
+
+  // 4. Algorithm and Engine Settings
+  BALANCER_MAX_ITERATIONS: 10000, // Safety break for the balancing loop.
+
+  // 5. User Interface Messages
+  UI_MESSAGES: {
+    GENERATION_SUCCESS: '✅ 스케줄 초안이 성공적으로 생성되었습니다.',
+    GENERATION_START: '⏳ 스케줄 초안 생성을 시작합니다...',
+    VALIDATION_ERROR: '⚠️ 규칙 위반! "📈로그" 시트에서 자세한 내용을 확인하세요.',
+    MISSING_SETTINGS_ERROR: (sheetName) => `"${sheetName}" 시트가 없습니다. 확인 후 다시 시도해주세요.`,
+    GENERIC_ERROR: '알 수 없는 오류가 발생했습니다. "📈로그" 시트를 확인해주세요.',
+    SETUP_SIDEBAR_TITLE: '초기 설정',
+    CALENDAR_UPDATE_SUCCESS: '📅 캘린더가 성공적으로 업데이트되었습니다.',
+    CALENDAR_UPDATE_START: '📅 공휴일 정보를 업데이트합니다...',
   },
   
-  // --- Ranges in ⭐근무표 (Schedule Sheet) ---
-  SCHEDULE: {
-    YEAR_CELL: 'B1',
-    MONTH_CELL: 'C1',
-    SCHEDULE_AREA_START_CELL: 'F3', // The first cell where the schedule grid (e.g., D8) begins.
-  },
-
-  // --- Ranges in ⚙️설정 (Settings Sheet) ---
-  SETTINGS: {
-    STAFF_LIST_RANGE: 'A2:A10',
-    SHIFT_DEFINITIONS_RANGE: 'E2:H',
-    SCHEDULING_RULES_RANGE: 'J2:L',
-  },
-  
-  // --- Column Names in ⛱️휴가신청 (Requests Sheet) ---
-  REQUESTS: {
-    STATUS_COLUMN_NAME: '상태',
-    APPROVED_STATUS_VALUE: '승인',
-    NAME_COLUMN_NAME: '이름',
-    START_DATE_COLUMN_NAME: '시작일',
-    END_DATE_COLUMN_NAME: '종료일',
-    TYPE_COLUMN_NAME: '요청 종류',
-  },
-
-  // --- Calendar Generation Settings ---
-  CALENDAR: {
-    HEADERS: ['날짜', '요일', '구분', '휴일명'],
-    TIME_ZONE: 'Asia/Seoul',
-  },
-
-  // --- Holiday API Settings ---
-  HOLIDAY_API: {
-    BASE_URL: 'http://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo',
-    API_KEY_PROPERTY: 'HOLIDAY_API_KEY',
-  },
+  // 6. API Configuration
+  HOLIDAY_API_URL: 'https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo',
+  HOLIDAY_API_SERVICE_KEY_PROPERTY: 'HOLIDAY_API_KEY', 
 };
-
-// Freeze the object to prevent accidental modifications during script execution.
-Object.freeze(CONFIG);
 

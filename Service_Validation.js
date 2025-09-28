@@ -1,147 +1,118 @@
 /**
- * @fileoverview A dedicated service for all post-generation schedule validation.
- * It provides stage-aware debugging and a final, comprehensive check.
- * @namespace Service_Validation
+ * @file Service_Validation.js
+ * @description Validates the generated schedule against all configured rules.
  */
-const Service_Validation = (function() {
-
-  // --- PRIVATE HELPER FUNCTIONS ---
-
-  function _checkStaffingLevels(ctx) {
-    let isValid = true;
-    for (let day = 1; day <= ctx.numDays; day++) {
-        const profile = ctx.dayProfiles.get(day);
-        const workingStaff = ctx.staffList.filter((name, i) => {
-            const shift = ctx.shiftDefinitions.get(ctx.scheduleGrid[i][day-1]);
-            return shift && shift.hours > 0;
-        });
-        if (workingStaff.length < profile.minStaff) {
-            isValid = false;
-            Util_Logger.error(`❌ [Validation FAIL] Staffing: On ${day}일, Expected at least ${profile.minStaff}, found ${workingStaff.length}.`);
-        }
-    }
-    if (isValid) Util_Logger.log("✅ [Validation PASS] Daily Staffing Levels");
-    return isValid;
-  }
-
-  function _checkSpecialOffs(ctx) {
-    if (ctx.rules.get('special_off_block_enabled') !== true) return true;
-    let isValid = true;
-    const staffWithout = ctx.staffList.filter(name => !ctx.staffProfiles.get(name).hasSpecialOff);
-    if (staffWithout.length > 0) {
-      isValid = false;
-      Util_Logger.error(`❌ [Validation FAIL] Fairness: Guaranteed '금+토' OFF was not assigned to: ${staffWithout.join(', ')}.`);
-    }
-    if (isValid) Util_Logger.log("✅ [Validation PASS] Guaranteed '금+토' OFF Assignment");
-    return isValid;
-  }
-
-  function _checkTotalOffs(ctx) {
-    let isValid = true;
-    ctx.staffList.forEach(name => {
-      const profile = ctx.staffProfiles.get(name);
-      if (profile.assignedOffs < profile.requiredOffs) {
-        isValid = false;
-        Util_Logger.error(`❌ [Validation FAIL] Fairness: ${name} has too few OFF days. Expected: ${profile.requiredOffs}, Found: ${profile.assignedOffs}`);
-      }
-    });
-    if (isValid) Util_Logger.log("✅ [Validation PASS] Total OFF Day Counts");
-    return isValid;
-  }
-
-  function _checkConsecutiveOffs(ctx) {
-    let isValid = true;
-    const maxConsecutive = ctx.rules.get('max_consecutive_offs');
-    ctx.staffList.forEach((name, staffIndex) => {
-        let currentConsecutive = 0;
-        for (let day = 0; day < ctx.numDays; day++) {
-            const shift = ctx.scheduleGrid[staffIndex][day];
-            const shiftInfo = ctx.shiftDefinitions.get(shift);
-            if(shift === 'OFF' || (shiftInfo && shiftInfo.hours === 0)) {
-                currentConsecutive++;
-            } else {
-                currentConsecutive = 0;
-            }
-            if (currentConsecutive > maxConsecutive) {
-                isValid = false;
-                Util_Logger.error(`❌ [Validation FAIL] Consecutive Rule: ${name} has more than ${maxConsecutive} consecutive OFFs ending on day ${day + 1}.`);
-                break;
-            }
-        }
-    });
-    if (isValid) Util_Logger.log("✅ [Validation PASS] Max Consecutive OFFs Rule");
-    return isValid;
-  }
-
-  function _checkWeekendFairness(ctx) {
-      let isValid = true;
-      const weekendShifts = ctx.staffList.map(name => ctx.staffProfiles.get(name).weekendShifts);
-      const min = Math.min(...weekendShifts);
-      const max = Math.max(...weekendShifts);
-      if (max - min > 2) {
-          isValid = false;
-          Util_Logger.error(`❌ [Validation FAIL] Fairness: Weekend shifts are not balanced. Min: ${min}, Max: ${max}.`);
-      }
-      if (isValid) Util_Logger.log("✅ [Validation PASS] Weekend Shift Balancing");
-      return isValid;
-  }
-
-  function _checkHourBalancing(ctx) {
-      let isValid = true;
-       ctx.staffList.forEach(name => {
-          const profile = ctx.staffProfiles.get(name);
-          if (Math.abs(profile.assignedHours - profile.targetHours) > 8) {
-              isValid = false;
-              Util_Logger.error(`❌ [Validation FAIL] Balancing: ${name} hour target missed. Expected: ~${profile.targetHours}, Found: ${profile.assignedHours}.`);
-          }
-       });
-      if (isValid) Util_Logger.log("✅ [Validation PASS] Final Hour Balancing");
-      return isValid;
-  }
-
+const Service_Validation = {
   /**
-   * NEW: A critical check to ensure no one exceeds the legal maximum weekly work hours.
+   * Runs all validation checks on the completed schedule.
+   * @param {Object} context The global scheduling context.
+   * @throws {ValidationError} If any rule is violated.
    */
-  function _checkWeeklyHourLimits(ctx) {
-    let isValid = true;
-    const maxWeeklyHours = ctx.rules.get('max_weekly_hours');
-    if (!maxWeeklyHours) return true; // Skip if rule not set
+  runFullValidation: function (context) {
+    const errors = [];
+    
+    // Per-day checks
+    for (let day = 1; day <= context.numDays; day++) {
+        errors.push(...this._validateStaffingLevels(context, day));
+    }
 
-    ctx.staffList.forEach(name => {
-      const profile = ctx.staffProfiles.get(name);
-      profile.weeklyStats.forEach(week => {
-        if (week.assignedHours > maxWeeklyHours) {
-          isValid = false;
-          Util_Logger.error(`❌ [Validation FAIL] Legal: ${name} exceeds max weekly hours (${maxWeeklyHours}) in week ${week.weekNumber}. Found: ${week.assignedHours}.`);
-        }
+    // Per-staff checks
+    context.staffList.forEach((staff, staffIndex) => {
+      errors.push(...this._validateMaxConsecutiveWorkDays(context, staffIndex));
+      errors.push(...this._validateGuaranteedOffBlock(context, staffIndex));
+      errors.push(...this._validateMinRestHours(context, staffIndex));
+    });
+
+    // Per-week, per-staff checks
+    context.weeks.forEach(week => {
+      context.staffList.forEach((staff, staffIndex) => {
+        errors.push(...this._validateMaxWeeklyHours(context, week, staffIndex));
       });
     });
-    if (isValid) Util_Logger.log("✅ [Validation PASS] Maximum Weekly Hours Limit");
-    return isValid;
-  }
+
+    if (errors.length > 0) {
+      const err = new Error('Schedule validation failed:\n' + errors.join('\n'));
+      err.name = 'ValidationError';
+      throw err;
+    }
+  },
+
+  /**
+   * Checks if a tentative shift assignment for a single staff member on a single day is valid.
+   * Used by the balancer to check potential swaps.
+   * @param {Object} context The global scheduling context.
+   * @param {number} day The day being checked.
+   * @param {number} staffIndex The index of the staff member.
+   * @returns {boolean} True if the day's assignment is valid for this staff member.
+   */
+  isDayValidForStaff: function(context, day, staffIndex) {
+     const consecutiveError = this._validateMaxConsecutiveWorkDays(context, staffIndex, day);
+     const restHoursError = this._validateMinRestHours(context, staffIndex, day);
+     return consecutiveError.length === 0 && restHoursError.length === 0;
+  },
+
+  _validateStaffingLevels: function (context, day) {
+    const errors = [], profile = context.dayProfiles.get(day), count = Util_Helpers.getAssignedStaffCountForDay(context, day);
+    if (count < profile.minStaff) errors.push(`Day ${day}: Staffing below minimum (${count}/${profile.minStaff})`);
+    if (count > profile.maxStaff) errors.push(`Day ${day}: Staffing above maximum (${count}/${profile.maxStaff})`);
+    return errors;
+  },
   
-  // --- PUBLIC INTERFACE ---
-  return {
-    validate: function(ctx) {
-      Util_Logger.log("--- Running Full Schedule Validation ---");
-      const isValid = 
-        _checkStaffingLevels(ctx) &&
-        _checkWeeklyHourLimits(ctx) && // Added new critical check
-        _checkSpecialOffs(ctx) &&
-        _checkTotalOffs(ctx) &&
-        _checkConsecutiveOffs(ctx) &&
-        _checkWeekendFairness(ctx) &&
-        _checkHourBalancing(ctx);
-      
-      if (isValid) Util_Logger.log("✅✅✅ --- Overall Validation PASSED --- ✅✅✅");
-      else Util_Logger.error("🔥🔥🔥 --- Overall Validation FAILED --- 🔥🔥🔥");
-      return isValid;
-    },
-    
-    validateAfterStep1: (ctx) => (ctx.dayProfiles && ctx.staffProfiles),
-    validateAfterStep2: (ctx) => _checkSpecialOffs(ctx),
-    validateAfterStep3: (ctx) => _checkWeekendFairness(ctx),
-    validateAfterStep4: (ctx) => _checkConsecutiveOffs(ctx), // Check after weekend OFFs
-    validateAfterStep5: (ctx) => _checkTotalOffs(ctx) && _checkConsecutiveOffs(ctx) && _checkStaffingLevels(ctx)
-  };
-})();
+  _validateMaxConsecutiveWorkDays: function(context, staffIndex, specificDay = null) {
+    const errors = [], max = Number(Service_Rules.getRule('consecutive_work_days_max'));
+    let count = 0;
+    for (let i = 0; i < context.numDays; i++) {
+      const shift = context.scheduleGrid[staffIndex][i];
+      const isWorkDay = shift && shift !== CONFIG.SPECIAL_SHIFTS.OFF && !context.approvedLeave.some(l=>l.reason === shift);
+      count = isWorkDay ? count + 1 : 0;
+      if (count > max && (!specificDay || specificDay === i+1)) {
+        errors.push(`${context.staffList[staffIndex].name}: Exceeded max consecutive work days ending on day ${i + 1}.`);
+      }
+    }
+    return errors;
+  },
+  
+  _validateMaxWeeklyHours: function(context, week, staffIndex) {
+    const errors = [], max = Number(Service_Rules.getRule('max_weekly_hours'));
+    let weeklyHours = 0;
+    week.days.forEach(day => {
+      const shiftDef = context.shiftDefinitions.get(context.scheduleGrid[staffIndex][day - 1]);
+      if (shiftDef) weeklyHours += shiftDef.hours;
+    });
+    if (weeklyHours > max) {
+      errors.push(`${context.staffList[staffIndex].name}: Exceeded max weekly hours for week ${week.weekNumber} (${weeklyHours}/${max})`);
+    }
+    return errors;
+  },
+
+  _validateGuaranteedOffBlock: function(context, staffIndex) {
+    if (Service_Rules.getRule('special_off_block_enabled') !== true) return [];
+    const errors = [], days = Service_Rules.getRule('special_off_block_days').split(',');
+    for (let day = 1; day < context.numDays; day++) {
+      if (context.dayProfiles.get(day).dayName === days[0] && context.scheduleGrid[staffIndex][day-1] === 'OFF' && context.scheduleGrid[staffIndex][day] === 'OFF') {
+        return []; // Found the block, validation passes for this staff.
+      }
+    }
+    errors.push(`${context.staffList[staffIndex].name}: Missing guaranteed '${days.join('+')}' OFF block.`);
+    return errors;
+  },
+
+  _validateMinRestHours: function(context, staffIndex, specificDay = null) {
+    const errors = [], minRest = Number(Service_Rules.getRule('min_rest_hours_between_shifts'));
+    for (let i = 0; i < context.numDays - 1; i++) {
+        const shift1 = context.shiftDefinitions.get(context.scheduleGrid[staffIndex][i]);
+        const shift2 = context.shiftDefinitions.get(context.scheduleGrid[staffIndex][i+1]);
+
+        if (shift1 && shift2) {
+            // This is a simplified check assuming shifts end at 18:00 and start at 09:00.
+            // A more robust implementation would store start/end times in shift definitions.
+            const restHours = 24 - shift1.hours + 9; // Simplified assumption
+            if (restHours < minRest && (!specificDay || specificDay === i+2)) {
+                errors.push(`${context.staffList[staffIndex].name}: Insufficient rest between day ${i+1} and ${i+2}.`);
+            }
+        }
+    }
+    return errors;
+  }
+};
+

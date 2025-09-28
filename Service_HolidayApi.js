@@ -1,74 +1,41 @@
 /**
- * @fileoverview Service for fetching and processing holiday data from the public API.
- * This service is responsible for all external HTTP requests to the holiday data portal.
- * @namespace Service_HolidayApi
+ * @file Service_HolidayApi.js
+ * @description Fetches South Korean public holiday information from the data.go.kr API.
  */
-const Service_HolidayApi = (function() {
-  
+const Service_HolidayApi = {
   /**
-   * Fetches holiday data from the API for a single year.
-   * @private
-   * @param {number} year The year to fetch.
-   * @returns {Array<{name: string, date: string}>} An array of holiday objects.
-   * @throws {Error} If API key is not set or the request fails.
+   * Fetches all public holidays for a given year.
+   * @param {number} year The year (e.g., 2025).
+   * @returns {Array<Object>} An array of holiday objects.
    */
-  function _fetchHolidaysForYear(year) {
-    const API_KEY = PropertiesService.getScriptProperties().getProperty(CONFIG.HOLIDAY_API.API_KEY_PROPERTY);
-    if (!API_KEY) {
-      throw new Error('API key is not set. Please run the "Set Holiday API Key" menu item.');
+  fetchHolidays: function(year) {
+    const serviceKey = PropertiesService.getScriptProperties().getProperty(CONFIG.HOLIDAY_API_SERVICE_KEY_PROPERTY);
+    if (!serviceKey) {
+        throw new Error("Holiday API service key is not set. Please set it in Project Settings > Script Properties.");
     }
-    const url = `${CONFIG.HOLIDAY_API.BASE_URL}?solYear=${year}&ServiceKey=${encodeURIComponent(API_KEY)}&_type=xml&numOfRows=100`;
+    const url = `${CONFIG.HOLIDAY_API_URL}?ServiceKey=${encodeURIComponent(serviceKey)}&solYear=${year}&_type=json&numOfRows=100`;
+    
+    try {
+      const response = UrlFetchApp.fetch(url, { 'muteHttpExceptions': true });
+      const resultCode = response.getResponseCode();
+      const content = response.getContentText();
 
-    const response = UrlFetchApp.fetch(url, { 'muteHttpExceptions': true });
-    const responseCode = response.getResponseCode();
-    const xmlContent = response.getContentText();
-
-    if (responseCode !== 200) {
-      throw new Error(`API request failed for year ${year} with status ${responseCode}. Response: ${xmlContent}`);
-    }
-
-    const document = XmlService.parse(xmlContent);
-    const root = document.getRootElement();
-    const items = root.getChild('body')?.getChild('items')?.getChildren('item');
-
-    if (!items) return [];
-
-    return items.map(item => ({
-      name: item.getChildText('dateName'),
-      date: item.getChildText('locdate') // YYYYMMDD format
-    }));
-  }
-
-  return {
-    /**
-     * Fetches holidays for a specified number of consecutive years and returns them as a Map.
-     * @param {number} startYear The first year to fetch holidays for.
-     * @param {number} numberOfYears The total number of years to fetch (e.g., 3).
-     * @returns {Map<string, string>} A Map where the key is 'YYYY-MM-DD' and the value is the holiday name.
-     */
-    fetchHolidays: function(startYear, numberOfYears = 3) {
-      const holidayMap = new Map();
-      Util_Logger.log(`Starting holiday fetch for ${numberOfYears} years from ${startYear}...`);
-
-      for (let i = 0; i < numberOfYears; i++) {
-        const year = startYear + i;
-        try {
-          const holidaysForYear = _fetchHolidaysForYear(year);
-          holidaysForYear.forEach(holiday => {
-            if (holiday.date && holiday.date.length === 8) {
-              const y = holiday.date.substring(0, 4);
-              const m = holiday.date.substring(4, 6);
-              const d = holiday.date.substring(6, 8);
-              holidayMap.set(`${y}-${m}-${d}`, holiday.name);
-            }
-          });
-          Util_Logger.log(`Successfully fetched ${holidaysForYear.length} holidays for ${year}.`);
-        } catch (e) {
-          Util_Logger.error(`Could not fetch holidays for year ${year}. Error: ${e.message}`);
+      if (resultCode === 200) {
+        const json = JSON.parse(content);
+        if (!json.response.body || json.response.body.items === '') {
+            Util_Logger.log('WARNING', `No holidays returned from API for year ${year}.`);
+            return [];
         }
+        // Ensure the result is always an array, even if there's only one holiday.
+        const items = json.response.body.items.item;
+        return Array.isArray(items) ? items : [items];
+      } else {
+        throw new Error(`API request failed with status ${resultCode}: ${content}`);
       }
-      return holidayMap;
+    } catch (e) {
+      Util_Logger.log('ERROR', `Failed to fetch holidays from API: ${e.message}`);
+      throw new Error(`공휴일 정보를 가져오는 데 실패했습니다. API 키 또는 네트워크 연결을 확인하세요.`);
     }
-  };
-})();
+  }
+};
 

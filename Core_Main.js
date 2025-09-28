@@ -1,98 +1,51 @@
 /**
- * @fileoverview Main entry point for user-triggered actions. This file orchestrates the application flow,
- * acting as the "controller" that tells the services what to do.
+ * @file Core_Main.js
+ * @description Main entry point for user-initiated actions from the custom menu.
+ * This file bridges the UI and the core application logic.
  */
 
 /**
- * Gathers all necessary data from the various sheets required for scheduling.
- * @returns {object} An object containing all the data needed for the scheduling process.
- * @private
- */
-function _gatherSchedulingData() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const scheduleSheet = ss.getSheetByName(CONFIG.SHEET_NAMES.SCHEDULE);
-  const settingsSheet = ss.getSheetByName(CONFIG.SHEET_NAMES.SETTINGS);
-  
-  const year = scheduleSheet.getRange(CONFIG.SCHEDULE.YEAR_CELL).getValue();
-  const month = scheduleSheet.getRange(CONFIG.SCHEDULE.MONTH_CELL).getValue();
-  
-  if (!year || !month || typeof year !== 'number' || typeof month !== 'number') {
-    throw new Error("Please select a valid year and month in the '⭐근무표' sheet.");
-  }
-
-  const data = {
-    year: year, month: month,
-    staffList: Service_Sheet.getColumn(settingsSheet, CONFIG.SETTINGS.STAFF_LIST_RANGE),
-    rules: Service_Sheet.getSchedulingRules(settingsSheet),
-    shiftDefinitions: Service_Sheet.getShiftDefinitions(settingsSheet),
-    approvedLeave: Service_Sheet.getApprovedLeave(year, month),
-    calendarData: Service_Sheet.getSheetData(CONFIG.SHEET_NAMES.CALENDAR),
-  };
-
-  if (!data.staffList || data.staffList.length === 0) {
-    throw new Error("No staff found in the '⚙️설정' sheet. Please add staff to the list.");
-  }
-  return data;
-}
-
-/**
- * Main function triggered by the user to generate a new schedule draft.
+ * Primary function called from the 'Generate Schedule' menu item.
+ * It orchestrates the entire schedule generation process.
  */
 function generateDraftSchedule() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ui = SpreadsheetApp.getUi();
+  ui.showToast(CONFIG.UI_MESSAGES.GENERATION_START, '시작');
+  
   try {
-    ss.toast('Generating schedule draft...', 'Processing...', -1);
-    Util_Logger.clear();
-    Util_Logger.log('--- Starting Full Schedule Generation ---');
-
-    const schedulingData = _gatherSchedulingData();
-    const result = Core_Orchestrator.create(schedulingData);
+    // Hand off the main logic to the orchestrator.
+    Core_Orchestrator.run();
     
-    const scheduleSheet = ss.getSheetByName(CONFIG.SHEET_NAMES.SCHEDULE);
-    const startCell = scheduleSheet.getRange(CONFIG.SCHEDULE.SCHEDULE_AREA_START_CELL);
-    const gridEndRow = startCell.getRow() + result.context.numDays - 1;
-
-    Service_Sheet.clearSummaries(gridEndRow + 1);
-    Service_Sheet.writeScheduleGrid(result.context.scheduleGrid, result.context.staffList);
-    
-    const summaryResults = Service_Summary.calculateAll(result.context);
-    
-    Service_Sheet.writeDailySummary(summaryResults.daily);
-    let nextRow = Service_Sheet.writeWeeklySummary(summaryResults.weekly, gridEndRow + 3);
-    Service_Sheet.writeMonthlySummary(summaryResults.monthly, nextRow + 2);
-    
-    ss.toast('✅ Schedule and summaries have been successfully generated!', 'Complete!', 7);
+    ui.showToast(CONFIG.UI_MESSAGES.GENERATION_SUCCESS, '완료');
+    Util_Logger.log('INFO', '========== Schedule Generation Run Finished Successfully ==========');
 
   } catch (e) {
-    const errorMessage = `Failed to generate schedule. Error: ${e.message} | Stack: ${e.stack}`;
-    Util_Logger.error(errorMessage);
-    ss.toast(`Error: ${e.message}`, 'Failed!', 10);
+    // Catch any errors bubbling up from the orchestrator and show a user-friendly message.
+    Util_Logger.log('ERROR', `Generation failed! ${e.name}: ${e.message}\nStack: ${e.stack}`);
+    let userMessage = CONFIG.UI_MESSAGES.GENERIC_ERROR;
+    if (e.name === 'MissingSheetError') {
+      userMessage = CONFIG.UI_MESSAGES.MISSING_SETTINGS_ERROR(e.sheetName);
+    } else if (e.name === 'ValidationError') {
+      userMessage = CONFIG.UI_MESSAGES.VALIDATION_ERROR;
+    }
+    ui.showToast(userMessage, '오류', -1);
   }
 }
 
 /**
- * Fetches holiday data from the API for the next 3 years and updates the calendar sheet.
+ * Function called from the menu to update the holiday calendar.
  */
-function updateCalendarFromApi() {
-  const ui = SpreadsheetApp.getUi();
-  try {
-    ui.showModalDialog(HtmlService.createHtmlOutput('<p>Updating calendar... Please wait.</p>').setWidth(350).setHeight(100), 'Processing...');
+function updateHolidayCalendar() {
+    const ui = SpreadsheetApp.getUi();
+    ui.showToast(CONFIG.UI_MESSAGES.CALENDAR_UPDATE_START, '시작');
     
-    const startYear = new Date().getFullYear();
-    const holidayMap = Service_HolidayApi.fetchHolidays(startYear, 3);
-    const startDate = new Date(startYear, 0, 1);
-    const endDate = new Date(startYear + 2, 11, 31);
-
-    const calendarRows = Service_Calendar.generateCalendarRows(startDate, endDate, holidayMap);
-
-    Service_Sheet.updateCalendarSheet(calendarRows);
-    
-    ui.alert('✅ Calendar has been successfully updated.');
-
-  } catch (e) {
-    const errorMessage = `Failed to update calendar: ${e.message}\n${e.stack}`;
-    Util_Logger.error(errorMessage);
-    ui.alert(`An error occurred: ${e.message}`);
-  }
+    try {
+        const year = new Date().getFullYear(); // Or get from a cell in the sheet
+        Service_Calendar.updateCalendarWithHolidays(year);
+        ui.showToast(CONFIG.UI_MESSAGES.CALENDAR_UPDATE_SUCCESS, '완료');
+    } catch (e) {
+        Util_Logger.log('ERROR', `Calendar update failed: ${e.message}`);
+        ui.showToast(`캘린더 업데이트 실패: ${e.message}`, '오류');
+    }
 }
 

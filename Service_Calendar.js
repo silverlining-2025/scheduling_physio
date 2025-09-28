@@ -1,48 +1,44 @@
 /**
- * @fileoverview Contains business logic related to creating and managing the calendar data.
- * This service does not interact directly with the spreadsheet.
- * @namespace Service_Calendar
+ * @file Service_Calendar.js
+ * @description Manages the 'Calendar' sheet, including updating it from an API.
  */
 const Service_Calendar = {
   /**
-   * Generates a 2D array of calendar data for a given date range and holiday map.
-   * This is a "pure" function, making it easy to test and reuse.
-   * @param {Date} startDate The first day of the calendar.
-   * @param {Date} endDate The last day of the calendar.
-   * @param {Map<string, string>} holidayMap A map of 'YYYY-MM-DD' to holiday names.
-   * @returns {Array<Array<any>>} A 2D array representing the calendar rows.
+   * Updates the calendar sheet with holidays for a given year.
+   * @param {number} year The year to fetch holidays for.
    */
-  generateCalendarRows: function(startDate, endDate, holidayMap) {
-    const calendarRows = [];
-    const KOREAN_DAYS = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
+  updateCalendarWithHolidays: function(year) {
+    const sheet = Service_Sheet._getSheetByName(CONFIG.SHEET_NAMES.CALENDAR);
+    const holidays = Service_HolidayApi.fetchHolidays(year);
 
-    let currentDate = new Date(startDate);
-
-    while (currentDate <= endDate) {
-      const dateString = Utilities.formatDate(currentDate, CONFIG.CALENDAR.TIME_ZONE, 'yyyy-MM-dd');
-      const dayOfWeek = currentDate.getDay();
-      let category = '';
-      let holidayName = '';
-
-      if (holidayMap.has(dateString)) {
-        category = '공휴일';
-        holidayName = holidayMap.get(dateString);
-      } else if (dayOfWeek === 0 || dayOfWeek === 6) {
-        category = '주말';
-      } else {
-        category = '평일';
-      }
-
-      calendarRows.push([
-        new Date(currentDate),
-        KOREAN_DAYS[dayOfWeek],
-        category,
-        holidayName
-      ]);
-
-      currentDate.setDate(currentDate.getDate() + 1);
+    // Create a full year's calendar grid.
+    const calendarGrid = [];
+    const startDate = new Date(year, 0, 1);
+    const endDate = new Date(year, 11, 31);
+    
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+        const dateStr = Utilities.formatDate(d, 'UTC', 'yyyy-MM-dd');
+        const dayOfWeek = Utilities.formatDate(d, SpreadsheetApp.getActive().getSpreadsheetTimeZone(), 'EEEE');
+        const holiday = holidays.find(h => h.locdate.toString() === dateStr.replace(/-/g, ''));
+        
+        let category = CONFIG.DAY_CATEGORIES.WEEKDAY;
+        if (d.getDay() === 0 || d.getDay() === 6) { // Sunday or Saturday
+            category = CONFIG.DAY_CATEGORIES.WEEKEND;
+        }
+        if (holiday) {
+            category = CONFIG.DAY_CATEGORIES.HOLIDAY;
+        }
+        
+        calendarGrid.push([dateStr, dayOfWeek, category, holiday ? holiday.dateName : '']);
     }
-    return calendarRows;
+
+    // Clear existing data and write the new calendar.
+    if(sheet.getLastRow() > 1) {
+      sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).clearContent();
+    }
+    sheet.getRange(2, 1, calendarGrid.length, 4).setValues(calendarGrid);
+
+    Util_Logger.log('INFO', `Calendar sheet updated for year ${year}.`);
   }
 };
 
