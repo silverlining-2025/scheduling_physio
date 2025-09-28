@@ -24,7 +24,9 @@ const Engine_ContextBuilder = {
     // CRITICAL: Initialize the rules service early so other builders can use it.
     Service_Rules.init(context);
     
+    // REFACTORED: Use a two-pass approach to avoid circular dependency.
     this._buildWeeksAndDayProfiles(context);
+    
     this._buildStaffProfiles(context);
 
     return context;
@@ -55,17 +57,19 @@ const Engine_ContextBuilder = {
 
   /**
    * Populates the dayProfiles and weeks properties of the context.
+   * This is now a two-pass process to prevent circular dependencies.
    * @private
    * @param {Object} context The context object being built.
    */
   _buildWeeksAndDayProfiles: function (context) {
+    // --- PASS 1: Create basic day profiles and week structure ---
     const weeks = [];
     let currentWeek = { weekNumber: 1, days: [] };
     
     for (let day = 1; day <= context.numDays; day++) {
       const date = new Date(context.year, context.month - 1, day);
       const calendarInfo = context.calendarMap.get(day) || { 
-          dayName: Utilities.formatDate(date, 'UTC', 'EEEE'), 
+          dayName: Utilities.formatDate(date, SpreadsheetApp.getActive().getSpreadsheetTimeZone(), 'EEEE'), 
           category: (date.getDay() === 0 || date.getDay() === 6) ? CONFIG.DAY_CATEGORIES.WEEKEND : CONFIG.DAY_CATEGORIES.WEEKDAY
       };
       
@@ -73,8 +77,6 @@ const Engine_ContextBuilder = {
         date: date,
         dayName: calendarInfo.dayName,
         category: calendarInfo.category,
-        minStaff: Service_Rules.getMinStaffForDay(day),
-        maxStaff: Service_Rules.getMaxStaffForDay(day),
       });
       
       currentWeek.days.push(day);
@@ -84,6 +86,14 @@ const Engine_ContextBuilder = {
       }
     }
     context.weeks = weeks;
+
+    // --- PASS 2: Enrich day profiles with rule-based data ---
+    // This can now be done safely because all basic day profiles exist.
+    for (let day = 1; day <= context.numDays; day++) {
+      const profile = context.dayProfiles.get(day);
+      profile.minStaff = Service_Rules.getMinStaffForDay(day);
+      profile.maxStaff = Service_Rules.getMaxStaffForDay(day);
+    }
   },
 
   /**

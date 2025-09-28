@@ -6,19 +6,32 @@
 
 /**
  * A private helper to get a UI instance and show a toast, simplifying the test functions.
+ * This version is hardened to fetch the UI object at the moment of use, avoiding stale contexts.
  * @param {string} testName The name of the test being run.
  * @param {function} testLogic The logic to execute for the test.
  */
 function _runTest(testName, testLogic) {
-  const ui = SpreadsheetApp.getUi();
   try {
+    // Execute the core logic of the test.
     testLogic();
-    ui.showToast(CONFIG.UI_MESSAGES.DEBUG_SUCCESS(testName), 'Debug');
+    // Get the UI and show a success message immediately after successful execution.
+    SpreadsheetApp.getUi().showToast(CONFIG.UI_MESSAGES.DEBUG_SUCCESS(testName), 'Debug');
   } catch (e) {
-    Util_Logger.log('ERROR', `DEBUG TEST FAILED [${testName}]: ${e.stack}`);
-    ui.showToast(CONFIG.UI_MESSAGES.DEBUG_ERROR(testName, e), 'Debug Error', -1);
+    // If testLogic fails, log the true error first.
+    const errorMessage = `DEBUG TEST FAILED [${testName}]: ${e.stack}`;
+    Util_Logger.log('ERROR', errorMessage);
+    
+    // Safely attempt to show an error toast.
+    try {
+      // Re-acquire the UI at the moment it's needed.
+      SpreadsheetApp.getUi().showToast(CONFIG.UI_MESSAGES.DEBUG_ERROR(testName, e), 'Debug Error', -1);
+    } catch (toastError) {
+      // If even this fails, the log sheet will have the original error.
+      Util_Logger.log('FATAL', `Failed to show error toast. The original error is logged above. Toast Error: ${toastError.stack}`);
+    }
   }
 }
+
 
 /**
  * Clears only the main schedule grid, leaving headers and staff names intact.

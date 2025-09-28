@@ -50,8 +50,29 @@ const Util_Debug = {
         'Weekend': p.summary.weekendWorkCount,
         'On-Call': p.summary.onCallCount,
     }));
+    
     console.log('\nStaff Summaries:');
-    console.table(summaries);
+    
+    // FIX: Replaced console.table with a manual text table formatter.
+    if (summaries.length > 0) {
+      const headers = Object.keys(summaries[0]);
+      const colWidths = headers.map(header => {
+        const allValues = [header, ...summaries.map(s => s[header].toString())];
+        return Math.max(...allValues.map(v => v.length));
+      });
+      
+      const headerString = headers.map((h, i) => h.padEnd(colWidths[i])).join(' | ');
+      console.log(headerString);
+      console.log(headers.map((h, i) => '-'.repeat(colWidths[i])).join('-|-'));
+
+      summaries.forEach(summary => {
+        const rowString = headers.map((h, i) => summary[h].toString().padEnd(colWidths[i])).join(' | ');
+        console.log(rowString);
+      });
+    } else {
+        console.log('No summary data to display.');
+    }
+
     console.log('--------------------------------------------------');
   }
 };
