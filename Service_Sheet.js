@@ -50,7 +50,7 @@ const Service_Sheet = {
       staffList: getValues(settingsSheet, 'A2:C').map(r => ({ name: r[0], phone: r[1], email: r[2] })),
       rules: new Map(getValues(settingsSheet, 'J2:K').map(r => [r[0], r[1]])),
       shiftDefinitions: new Map(getValues(settingsSheet, 'E2:H').map(r => [r[0], { code: r[0], description: r[1], category: r[2], hours: Number(r[3]) || 0 }])),
-      approvedLeave: this._getApprovedLeave(),
+      approvedLeave: this._getApprovedLeave(parseInt(year), parseInt(month)),
       calendarData: calendarSheet.getRange(CONFIG.RANGES.CALENDAR_DATA_RANGE + calendarSheet.getLastRow()).getValues(),
     };
   },
@@ -58,18 +58,29 @@ const Service_Sheet = {
   /**
    * Reads and filters approved leave requests for the current month.
    * @private
+   * @param {number} year The target schedule year.
+   * @param {number} month The target schedule month.
    * @returns {Array<Object>} A list of approved leave request objects.
    */
-  _getApprovedLeave: function () {
+  _getApprovedLeave: function (year, month) {
     const sheet = this._getSheetByName(CONFIG.SHEET_NAMES.LEAVE_REQUESTS);
     const data = sheet.getDataRange().getValues();
-    // Skip header row, filter by status, and map to a clean object.
-    return data.slice(1).filter(row => row[7] === CONFIG.LEAVE_STATUS.APPROVED).map(row => ({
-      name: row[2],
-      startDay: new Date(row[4]).getDate(),
-      endDay: new Date(row[5]).getDate(),
-      reason: row[3],
-    }));
+    
+    return data.slice(1) // Skip header row
+      .filter(row => {
+        const status = row[7];
+        const startDate = new Date(row[4]);
+        // Check if the leave falls within the target month.
+        return status === CONFIG.LEAVE_STATUS.APPROVED && 
+               startDate.getFullYear() === year &&
+               startDate.getMonth() + 1 === month;
+      })
+      .map(row => ({
+        name: row[2],
+        startDay: new Date(row[4]).getDate(),
+        endDay: new Date(row[5]).getDate(),
+        reason: row[3],
+      }));
   },
 
   /**

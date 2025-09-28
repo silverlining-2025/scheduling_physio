@@ -13,9 +13,9 @@ const Util_Helpers = {
     let count = 0;
     for (let i = 0; i < context.staffList.length; i++) {
       const shiftCode = context.scheduleGrid[i][day - 1];
-      // A working shift is anything that is not null, not 'OFF', and not a leave code.
-      // This is a simplification; a more robust check might query shift definitions.
-      if (shiftCode && shiftCode !== CONFIG.SPECIAL_SHIFTS.OFF && !context.shiftDefinitions.get(shiftCode)?.hours === 0) {
+      const shiftDef = context.shiftDefinitions.get(shiftCode);
+      // A working day is one with a shift definition that has hours > 0.
+      if (shiftDef && shiftDef.hours > 0) {
         count++;
       }
     }

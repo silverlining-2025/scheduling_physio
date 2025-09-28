@@ -12,7 +12,7 @@ const CONFIG = {
     LEAVE_REQUESTS: '⛱️휴가신청',
     LOG: '📈로그',
     MY_SCHEDULE: '👤내 근무 확인',
-    CALENDAR: '📅캘린der',
+    CALENDAR: '📅캘린더', // Corrected typo from '캘린der'
   },
 
   // 2. Cell Range Definitions
@@ -58,6 +58,8 @@ const CONFIG = {
     SETUP_SIDEBAR_TITLE: '초기 설정',
     CALENDAR_UPDATE_SUCCESS: '📅 캘린더가 성공적으로 업데이트되었습니다.',
     CALENDAR_UPDATE_START: '📅 공휴일 정보를 업데이트합니다...',
+    DEBUG_SUCCESS: (testName) => `✅ ${testName} 테스트를 성공적으로 완료했습니다.`,
+    DEBUG_ERROR: (testName, error) => `❌ ${testName} 테스트 중 오류 발생: ${error.message}`,
   },
   
   // 6. API Configuration

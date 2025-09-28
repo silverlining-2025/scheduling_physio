@@ -5,19 +5,31 @@
 const Engine_Fairness = {
   /**
    * Sorts a list of staff indices based on a specific summary count, ascending.
-   * This is used to prioritize staff who have been assigned fewer shifts of a certain type.
+   * Includes a tie-breaking mechanism using total work hours for more robust fairness.
    * @param {Object} context The global scheduling context.
    * @param {Array<number>} candidateIndices The list of staff indices to sort.
    * @param {string} summaryKey The key from the staff profile summary to sort by (e.g., 'onCallCount').
+   * @param {string} [tieBreakerKey='totalHours'] An optional secondary key for tie-breaking.
    * @returns {Array<number>} The sorted list of staff indices.
    */
-  sortCandidatesByCount: function(context, candidateIndices, summaryKey) {
+  sortCandidatesByCount: function(context, candidateIndices, summaryKey, tieBreakerKey = 'totalHours') {
     return candidateIndices.sort((a, b) => {
       const profileA = context.staffProfiles.get(context.staffList[a].name);
       const profileB = context.staffProfiles.get(context.staffList[b].name);
+      
       const countA = (profileA && profileA.summary[summaryKey]) || 0;
       const countB = (profileB && profileB.summary[summaryKey]) || 0;
-      return countA - countB;
+
+      // If the primary counts are different, sort by them.
+      if (countA !== countB) {
+        return countA - countB;
+      }
+
+      // --- Tie-breaker ---
+      // If primary counts are equal, sort by the tie-breaker key (usually total hours).
+      const tieBreakerA = (profileA && profileA.summary[tieBreakerKey]) || 0;
+      const tieBreakerB = (profileB && profileB.summary[tieBreakerKey]) || 0;
+      return tieBreakerA - tieBreakerB;
     });
   },
 
@@ -40,7 +52,8 @@ const Engine_Fairness = {
         });
       }
     });
-    // Sort by the largest deviation first.
+    // Sort by the largest deviation first to prioritize fixing the biggest issues.
     return imbalances.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
   },
 };
+
